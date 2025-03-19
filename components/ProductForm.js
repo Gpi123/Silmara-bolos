@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import CustomImage from './CustomImage';
+import { uploadImage } from '../services/productService'; // Importando a função de upload
 
 export default function ProductForm({ product, onSubmit, onCancel }) {
   const [formData, setFormData] = useState({
@@ -13,6 +14,7 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   // Campo para URL de imagem externa
   const [externalImageURL, setExternalImageURL] = useState('');
@@ -48,6 +50,8 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
+    console.log("Arquivo selecionado:", file?.name);
+    
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
         toast.error('A imagem deve ter menos de 5MB');
@@ -58,6 +62,11 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
       const reader = new FileReader();
       reader.onload = () => {
         setImagePreview(reader.result);
+        console.log("Preview da imagem criado com sucesso");
+      };
+      reader.onerror = (error) => {
+        console.error("Erro ao ler o arquivo:", error);
+        toast.error("Erro ao carregar a imagem");
       };
       reader.readAsDataURL(file);
     }
@@ -81,15 +90,30 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
     
     try {
       setLoading(true);
+      let finalImageURL = externalImageURL;
+      
+      // Se temos um arquivo de imagem, fazemos o upload
+      if (imageFile) {
+        console.log("Iniciando upload da imagem...");
+        try {
+          finalImageURL = await uploadImage(imageFile);
+          console.log("Upload concluído. URL:", finalImageURL);
+        } catch (uploadError) {
+          console.error("Erro no upload:", uploadError);
+          toast.error("Erro ao fazer upload da imagem. O produto será salvo sem imagem.");
+          finalImageURL = "";
+        }
+      }
       
       // Formatando o preço para número antes de enviar
       const formattedData = {
         ...formData,
         price: parseFloat(formData.price.replace(',', '.')),
-        imageURL: externalImageURL || formData.imageURL  // Usar URL externa se disponível
+        imageURL: finalImageURL || formData.imageURL // Usar URL externa se disponível
       };
       
-      await onSubmit(formattedData, imageFile);
+      console.log("Dados do produto a salvar:", formattedData);
+      await onSubmit(formattedData, null); // Não precisamos passar o imageFile aqui, já fizemos o upload
       setLoading(false);
       
       // Resetar formulário após submissão bem-sucedida
@@ -193,12 +217,12 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
       
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Ou faça upload de uma imagem (Temporariamente desativado)
+          Ou faça upload de uma imagem
         </label>
         <input
           type="file"
           accept="image/*"
-          disabled={true}
+          onChange={handleImageChange}
           className="block w-full text-sm text-gray-500
             file:mr-4 file:py-2 file:px-4
             file:rounded-md file:border-0
@@ -207,7 +231,7 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
             hover:file:bg-gray-200"
         />
         <p className="mt-1 text-xs text-gray-500">
-          Upload desativado temporariamente. Use a URL da imagem acima.
+          Tamanho máximo: 5MB. Formatos recomendados: JPG, PNG.
         </p>
       </div>
       
@@ -215,10 +239,14 @@ export default function ProductForm({ product, onSubmit, onCancel }) {
         <div className="mt-2">
           <p className="text-sm font-medium text-gray-700 mb-2">Pré-visualização:</p>
           <div className="relative h-40 w-40 border rounded-md overflow-hidden">
-            <CustomImage 
+            <img 
               src={imagePreview} 
               alt="Pré-visualização" 
-              className="rounded-md"
+              className="object-cover w-full h-full"
+              onError={(e) => {
+                console.error("Erro ao carregar preview:", e);
+                e.target.src = "https://via.placeholder.com/150?text=Erro";
+              }}
             />
           </div>
         </div>

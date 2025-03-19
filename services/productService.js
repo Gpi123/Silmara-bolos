@@ -10,7 +10,7 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage } from '../firebase/config';
+import { app, db, storage } from '../firebase/config';
 
 const COLLECTION_NAME = 'products';
 const LOCAL_STORAGE_KEY = 'localProducts';
@@ -279,5 +279,55 @@ export const deleteProduct = async (id) => {
   } catch (error) {
     console.error('Erro ao deletar produto:', error);
     throw error;
+  }
+};
+
+// Função simplificada para upload de imagens
+export const uploadImage = async (file) => {
+  try {
+    if (!file) {
+      console.log("Nenhum arquivo fornecido");
+      return null;
+    }
+    
+    console.log("Iniciando upload da imagem:", file.name, "Tamanho:", Math.round(file.size/1024), "KB");
+    
+    // Verifica se o storage está disponível
+    if (storage) {
+      try {
+        // Cria uma referência para o arquivo no Firebase Storage
+        const timestamp = new Date().getTime();
+        const filename = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+        const storagePath = `images/${filename}`;
+        
+        console.log("Caminho no storage:", storagePath);
+        const storageRef = ref(storage, storagePath);
+        
+        // Faz o upload do arquivo
+        console.log("Iniciando upload para Firebase Storage...");
+        const uploadResult = await uploadBytes(storageRef, file);
+        console.log('Upload realizado com sucesso:', uploadResult.ref.fullPath);
+        
+        // Obtém a URL pública do arquivo
+        console.log("Obtendo URL de download...");
+        const downloadURL = await getDownloadURL(uploadResult.ref);
+        
+        console.log('URL da imagem:', downloadURL);
+        return downloadURL;
+      } catch (error) {
+        console.error('Erro no upload para Firebase:', error);
+        alert('Erro ao fazer upload da imagem: ' + error.message);
+        return null;
+      }
+    } else {
+      console.error('Firebase Storage não está disponível');
+      alert('Firebase Storage não está disponível');
+      // Fallback para URL local temporária
+      return URL.createObjectURL(file);
+    }
+  } catch (error) {
+    console.error('Erro ao fazer upload da imagem:', error);
+    alert('Erro ao fazer upload da imagem: ' + error.message);
+    return null;
   }
 }; 
