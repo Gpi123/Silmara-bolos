@@ -111,20 +111,17 @@ export default function Login() {
                 {loading ? 'Entrando...' : 'Entrar'}
               </button>
             </div>
-
-            <div className="text-center text-sm">
-              <p className="text-gray-600">Usar: Silmara / 231523</p>
-            </div>
           </form>
           
-          <div className="text-center pt-4">
-            <button
-              onClick={handleCreateAdminUser}
-              className="text-xs text-primary hover:text-secondary"
-            >
-              Criar usuário administrador
-            </button>
+          {/* 
+          <div className="border border-red-300 rounded p-4 mt-4 text-center">
+            <p className="text-gray-700 mb-3">Usar: Silmara / 231523</p>
+            
+            <Link href="/register">
+              <a className="text-pink-400 hover:text-pink-500">Criar usuário administrador</a>
+            </Link>
           </div>
+          */}
         </div>
       </div>
     </Layout>
