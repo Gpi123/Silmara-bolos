@@ -7,7 +7,8 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  orderBy 
+  orderBy,
+  serverTimestamp
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app, db, storage } from '../firebase/config';
@@ -15,7 +16,7 @@ import { app, db, storage } from '../firebase/config';
 const COLLECTION_NAME = 'products';
 const LOCAL_STORAGE_KEY = 'localProducts';
 
-// Função para obter o ID único
+// Função para gerar ID único (usada como fallback)
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
@@ -50,43 +51,27 @@ const initializeLocalStorage = () => {
 // Obter todos os produtos
 export const getAllProducts = async () => {
   try {
-    // Primeiro tentamos usar o localStorage
-    let products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-    
-    // Se não houver produtos, inicializamos com exemplos
-    if (products.length === 0) {
-      products = initializeLocalStorage();
-    }
-    
-    // Ordenamos por nome
-    products.sort((a, b) => a.name.localeCompare(b.name));
-    
-    return products;
-    
-    /* Código original do Firebase - mantido para referência
+    console.log("Buscando produtos do Firestore...");
     const q = query(collection(db, COLLECTION_NAME), orderBy('name'));
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    */
+    const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    console.log(`${products.length} produtos encontrados no Firestore`);
+    return products;
   } catch (error) {
-    console.error('Erro ao buscar produtos:', error);
-    throw error;
+    console.error('Erro ao buscar produtos do Firestore:', error);
+    
+    // Fallback para localStorage em caso de erro
+    console.log("Usando localStorage como fallback");
+    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+    return products;
   }
 };
 
 // Obter um produto pelo ID
 export const getProductById = async (id) => {
   try {
-    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-    const product = products.find(p => p.id === id);
-    
-    if (product) {
-      return product;
-    } else {
-      throw new Error('Produto não encontrado');
-    }
-    
-    /* Código original do Firebase - mantido para referência
+    console.log(`Buscando produto ${id} do Firestore`);
     const docRef = doc(db, COLLECTION_NAME, id);
     const docSnap = await getDoc(docRef);
     
@@ -95,74 +80,87 @@ export const getProductById = async (id) => {
     } else {
       throw new Error('Produto não encontrado');
     }
-    */
   } catch (error) {
-    console.error('Erro ao buscar produto:', error);
-    throw error;
+    console.error('Erro ao buscar produto do Firestore:', error);
+    
+    // Fallback para localStorage em caso de erro
+    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+    const product = products.find(p => p.id === id);
+    
+    if (product) {
+      return product;
+    } else {
+      throw new Error('Produto não encontrado');
+    }
   }
 };
 
 // Adicionar um novo produto
 export const addProduct = async (productData, imageFile) => {
   try {
-    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-    
-    let imageURL = '';
-    
-    // Se for uma imagem do tipo File, simularemos upload usando URL.createObjectURL
-    if (imageFile instanceof File) {
-      // No ambiente real, faríamos upload para o Firebase
-      // Aqui, apenas salvamos a URL da imagem fornecida ou usamos uma URL placeholder
-      imageURL = productData.imageURL || 'https://via.placeholder.com/300';
-    } else if (productData.imageURL) {
-      // Se já tiver uma URL de imagem no productData, usamos ela
-      imageURL = productData.imageURL;
-    }
-    
-    // Criar novo produto
-    const newProduct = {
-      id: generateId(),
-      ...productData,
-      imageURL,
-      createdAt: new Date()
-    };
-    
-    // Adicionar ao array de produtos
-    products.push(newProduct);
-    
-    // Salvar no localStorage
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
-    
-    return newProduct;
-    
-    /* Código original do Firebase - mantido para referência
-    let imageURL = '';
+    let imageURL = productData.imageURL || '';
     
     // Se houver uma imagem, fazer upload para o Storage
     if (imageFile) {
-      const storageRef = ref(storage, `products/${Date.now()}_${imageFile.name}`);
-      await uploadBytes(storageRef, imageFile);
-      imageURL = await getDownloadURL(storageRef);
+      imageURL = await uploadImage(imageFile);
     }
     
-    // Adicionar o produto no Firestore com a URL da imagem
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
+    // Dados a serem salvos no Firestore
+    const dataToSave = {
       ...productData,
       imageURL,
-      createdAt: new Date()
-    });
+      createdAt: serverTimestamp()
+    };
     
-    return { id: docRef.id, ...productData, imageURL };
-    */
+    console.log("Salvando produto no Firestore:", dataToSave);
+    const docRef = await addDoc(collection(db, COLLECTION_NAME), dataToSave);
+    
+    return { id: docRef.id, ...dataToSave };
   } catch (error) {
-    console.error('Erro ao adicionar produto:', error);
-    throw error;
+    console.error('Erro ao adicionar produto no Firestore:', error);
+    
+    // Fallback para localStorage em caso de erro
+    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+    const newProduct = {
+      id: generateId(),
+      ...productData,
+      imageURL: productData.imageURL || '',
+      createdAt: new Date()
+    };
+    
+    products.push(newProduct);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
+    
+    return newProduct;
   }
 };
 
 // Atualizar um produto existente
 export const updateProduct = async (id, productData, imageFile) => {
   try {
+    let imageURL = productData.imageURL || '';
+    
+    // Se houver uma nova imagem, fazer upload e atualizar a URL
+    if (imageFile) {
+      imageURL = await uploadImage(imageFile);
+    }
+    
+    // Dados a serem atualizados no Firestore
+    const dataToUpdate = {
+      ...productData,
+      imageURL,
+      updatedAt: serverTimestamp()
+    };
+    
+    console.log(`Atualizando produto ${id} no Firestore`);
+    const productRef = doc(db, COLLECTION_NAME, id);
+    await updateDoc(productRef, dataToUpdate);
+    
+    return { id, ...dataToUpdate };
+  } catch (error) {
+    console.error('Erro ao atualizar produto no Firestore:', error);
+    
+    // Fallback para localStorage em caso de erro
     const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
     const index = products.findIndex(p => p.id === id);
     
@@ -170,90 +168,26 @@ export const updateProduct = async (id, productData, imageFile) => {
       throw new Error('Produto não encontrado');
     }
     
-    let imageURL = productData.imageURL || '';
-    
-    // Se for uma imagem do tipo File, atualizamos a URL
-    if (imageFile instanceof File) {
-      // No ambiente real, faríamos upload para o Firebase
-      // Aqui, apenas atualizamos a URL da imagem
-      imageURL = productData.imageURL || 'https://via.placeholder.com/300';
-    }
-    
-    // Atualizar o produto
     const updatedProduct = {
       ...products[index],
       ...productData,
-      imageURL,
+      imageURL: productData.imageURL || products[index].imageURL || '',
       updatedAt: new Date()
     };
     
-    // Substituir no array
     products[index] = updatedProduct;
-    
-    // Salvar no localStorage
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
     
     return updatedProduct;
-    
-    /* Código original do Firebase - mantido para referência
-    const productRef = doc(db, COLLECTION_NAME, id);
-    const productSnap = await getDoc(productRef);
-    
-    if (!productSnap.exists()) {
-      throw new Error('Produto não encontrado');
-    }
-    
-    let imageURL = productData.imageURL || '';
-    
-    // Se houver uma nova imagem, fazer upload e atualizar a URL
-    if (imageFile) {
-      // Se já existir uma imagem anterior, deletá-la
-      if (productSnap.data().imageURL) {
-        try {
-          const oldImageRef = ref(storage, productSnap.data().imageURL);
-          await deleteObject(oldImageRef);
-        } catch (error) {
-          console.log('Imagem anterior não encontrada no storage');
-        }
-      }
-      
-      // Fazer upload da nova imagem
-      const storageRef = ref(storage, `products/${Date.now()}_${imageFile.name}`);
-      await uploadBytes(storageRef, imageFile);
-      imageURL = await getDownloadURL(storageRef);
-    }
-    
-    // Atualizar o produto no Firestore
-    await updateDoc(productRef, {
-      ...productData,
-      imageURL,
-      updatedAt: new Date()
-    });
-    
-    return { id, ...productData, imageURL };
-    */
-  } catch (error) {
-    console.error('Erro ao atualizar produto:', error);
-    throw error;
   }
 };
 
 // Deletar um produto
 export const deleteProduct = async (id) => {
   try {
-    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
-    const filteredProducts = products.filter(p => p.id !== id);
+    console.log(`Excluindo produto ${id} do Firestore`);
     
-    if (filteredProducts.length === products.length) {
-      throw new Error('Produto não encontrado');
-    }
-    
-    // Salvar produtos atualizados no localStorage
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filteredProducts));
-    
-    return id;
-    
-    /* Código original do Firebase - mantido para referência
+    // Obter produto para pegar a URL da imagem, se existir
     const productRef = doc(db, COLLECTION_NAME, id);
     const productSnap = await getDoc(productRef);
     
@@ -261,13 +195,14 @@ export const deleteProduct = async (id) => {
       throw new Error('Produto não encontrado');
     }
     
-    // Se houver uma imagem, deletá-la do Storage
+    // Se houver uma imagem, tentar deletá-la do Storage
     if (productSnap.data().imageURL) {
       try {
         const imageRef = ref(storage, productSnap.data().imageURL);
         await deleteObject(imageRef);
-      } catch (error) {
-        console.log('Imagem não encontrada no storage');
+        console.log("Imagem deletada com sucesso do Storage");
+      } catch (imageError) {
+        console.log('Aviso: Imagem não encontrada no storage ou outro erro:', imageError);
       }
     }
     
@@ -275,59 +210,59 @@ export const deleteProduct = async (id) => {
     await deleteDoc(productRef);
     
     return id;
-    */
   } catch (error) {
-    console.error('Erro ao deletar produto:', error);
-    throw error;
+    console.error('Erro ao deletar produto do Firestore:', error);
+    
+    // Fallback para localStorage em caso de erro
+    const products = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+    const filteredProducts = products.filter(p => p.id !== id);
+    
+    if (filteredProducts.length === products.length) {
+      throw new Error('Produto não encontrado');
+    }
+    
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filteredProducts));
+    
+    return id;
   }
 };
 
-// Função simplificada para upload de imagens
+// Função para upload de imagens
 export const uploadImage = async (file) => {
   try {
     if (!file) {
-      console.log("Nenhum arquivo fornecido");
+      console.log("Nenhum arquivo fornecido para upload");
       return null;
     }
     
     console.log("Iniciando upload da imagem:", file.name, "Tamanho:", Math.round(file.size/1024), "KB");
     
-    // Verifica se o storage está disponível
     if (storage) {
-      try {
-        // Cria uma referência para o arquivo no Firebase Storage
-        const timestamp = new Date().getTime();
-        const filename = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
-        const storagePath = `images/${filename}`;
-        
-        console.log("Caminho no storage:", storagePath);
-        const storageRef = ref(storage, storagePath);
-        
-        // Faz o upload do arquivo
-        console.log("Iniciando upload para Firebase Storage...");
-        const uploadResult = await uploadBytes(storageRef, file);
-        console.log('Upload realizado com sucesso:', uploadResult.ref.fullPath);
-        
-        // Obtém a URL pública do arquivo
-        console.log("Obtendo URL de download...");
-        const downloadURL = await getDownloadURL(uploadResult.ref);
-        
-        console.log('URL da imagem:', downloadURL);
-        return downloadURL;
-      } catch (error) {
-        console.error('Erro no upload para Firebase:', error);
-        alert('Erro ao fazer upload da imagem: ' + error.message);
-        return null;
-      }
+      // Cria uma referência para o arquivo no Firebase Storage
+      const timestamp = new Date().getTime();
+      const filename = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+      const storagePath = `images/${filename}`;
+      
+      console.log("Caminho no storage:", storagePath);
+      const storageRef = ref(storage, storagePath);
+      
+      // Faz o upload do arquivo
+      console.log("Iniciando upload para Firebase Storage...");
+      const uploadResult = await uploadBytes(storageRef, file);
+      console.log('Upload realizado com sucesso:', uploadResult.ref.fullPath);
+      
+      // Obtém a URL pública do arquivo
+      console.log("Obtendo URL de download...");
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+      
+      console.log('URL da imagem:', downloadURL);
+      return downloadURL;
     } else {
       console.error('Firebase Storage não está disponível');
-      alert('Firebase Storage não está disponível');
-      // Fallback para URL local temporária
-      return URL.createObjectURL(file);
+      throw new Error('Firebase Storage não está disponível');
     }
   } catch (error) {
     console.error('Erro ao fazer upload da imagem:', error);
-    alert('Erro ao fazer upload da imagem: ' + error.message);
-    return null;
+    throw error;
   }
 }; 
